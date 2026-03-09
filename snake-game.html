@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0f;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+      color: #e0e0e0;
+      user-select: none;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.3em;
+      color: #4ade80;
+      text-shadow: 0 0 20px #4ade8066;
+      margin-bottom: 1rem;
+    }
+
+    #hud {
+      display: flex;
+      gap: 3rem;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+      letter-spacing: 0.1em;
+      color: #888;
+    }
+
+    #hud span { color: #4ade80; font-weight: bold; }
+
+    #canvas-wrapper {
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      border: 2px solid #1a1a2e;
+      box-shadow: 0 0 40px #4ade8022, inset 0 0 40px #00000088;
+      background: #0d0d1a;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0fcc;
+      backdrop-filter: blur(2px);
+    }
+
+    #overlay h2 {
+      font-size: 1.8rem;
+      letter-spacing: 0.2em;
+      margin-bottom: 0.5rem;
+    }
+
+    #overlay .score-display {
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 0.3rem;
+    }
+
+    #overlay .score-display span { color: #4ade80; }
+
+    #overlay button {
+      margin-top: 1.5rem;
+      padding: 0.6rem 2rem;
+      background: transparent;
+      border: 2px solid #4ade80;
+      color: #4ade80;
+      font-family: inherit;
+      font-size: 0.9rem;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    #overlay button:hover {
+      background: #4ade8022;
+      box-shadow: 0 0 12px #4ade8066;
+    }
+
+    #hint {
+      margin-top: 1rem;
+      font-size: 0.7rem;
+      color: #444;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+  <h1>SNAKE</h1>
+  <div id="hud">
+    <div>SCORE <span id="score">0</span></div>
+    <div>BEST <span id="best">0</span></div>
+    <div>LEVEL <span id="level">1</span></div>
+  </div>
+
+  <div id="canvas-wrapper">
+    <canvas id="canvas" width="500" height="500"></canvas>
+
+    <div id="overlay">
+      <h2 style="color:#4ade80">READY?</h2>
+      <div class="score-display" style="margin-top:0.5rem; color:#555">WASD or Arrow Keys to move</div>
+      <button id="start-btn">START GAME</button>
+    </div>
+  </div>
+
+  <div id="hint">WASD / ARROW KEYS &nbsp;·&nbsp; P to pause</div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const levelEl = document.getElementById('level');
+
+    const COLS = 25, ROWS = 25;
+    const CELL = canvas.width / COLS;
+
+    const COLORS = {
+      head:     '#4ade80',
+      body:     '#22c55e',
+      tail:     '#166534',
+      food:     '#f97316',
+      foodGlow: '#f9731666',
+      grid:     '#ffffff08',
+      dead:     '#ef4444',
+      obstacle: '#6366f1',
+      obstacleEdge: '#818cf8',
+    };
+
+    let snake, dir, nextDir, food, obstacles, score, best, level, speed, gameLoop, state, particles;
+
+    best = parseInt(localStorage.getItem('snake_best') || '0');
+    bestEl.textContent = best;
+
+    function init() {
+      const mid = Math.floor(COLS / 2);
+      snake = [
+        { x: mid, y: mid },
+        { x: mid - 1, y: mid },
+        { x: mid - 2, y: mid },
+      ];
+      dir = { x: 1, y: 0 };
+      nextDir = { x: 1, y: 0 };
+      score = 0;
+      level = 1;
+      speed = 130;
+      particles = [];
+      scoreEl.textContent = 0;
+      levelEl.textContent = 1;
+      placeObstacles();
+      placeFood();
+    }
+
+    function placeObstacles() {
+      const mid = Math.floor(COLS / 2);
+      // Clear zone: 5-cell radius around snake start
+      const safeSet = new Set();
+      for (let dx = -5; dx <= 5; dx++)
+        for (let dy = -5; dy <= 5; dy++)
+          safeSet.add(`${mid + dx},${mid + dy}`);
+
+      const count = 8 + level * 2; // more obstacles per level, max ~28
+      obstacles = new Set();
+      let attempts = 0;
+      while (obstacles.size < count && attempts < 500) {
+        attempts++;
+        const x = Math.floor(Math.random() * COLS);
+        const y = Math.floor(Math.random() * ROWS);
+        const key = `${x},${y}`;
+        if (!safeSet.has(key)) obstacles.add(key);
+      }
+    }
+
+    function placeFood() {
+      const occupied = new Set(snake.map(s => `${s.x},${s.y}`));
+      let pos;
+      do {
+        pos = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+      } while (occupied.has(`${pos.x},${pos.y}`) || obstacles.has(`${pos.x},${pos.y}`));
+      food = pos;
+    }
+
+    function step() {
+      dir = { ...nextDir };
+      const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+      // Wall collision
+      if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) return die();
+      // Self collision
+      if (snake.some(s => s.x === head.x && s.y === head.y)) return die();
+      // Obstacle collision
+      if (obstacles.has(`${head.x},${head.y}`)) return die();
+
+      snake.unshift(head);
+
+      if (head.x === food.x && head.y === food.y) {
+        score += level * 10;
+        scoreEl.textContent = score;
+        if (score > best) { best = score; bestEl.textContent = best; localStorage.setItem('snake_best', best); }
+        spawnParticles(food.x, food.y);
+        placeFood();
+        // Level up every 5 foods
+        if (snake.length % 5 === 0) {
+          level = Math.min(level + 1, 10);
+          levelEl.textContent = level;
+          speed = Math.max(60, 130 - (level - 1) * 8);
+          clearInterval(gameLoop);
+          gameLoop = setInterval(step, speed);
+          placeObstacles(); // refresh obstacles on level up
+        }
+      } else {
+        snake.pop();
+      }
+
+      draw();
+    }
+
+    function die() {
+      state = 'dead';
+      clearInterval(gameLoop);
+      // Death particles
+      snake.forEach(s => spawnParticles(s.x, s.y, COLORS.dead));
+      drawDead();
+      showOverlay('GAME OVER', `SCORE <span>${score}</span> &nbsp;·&nbsp; BEST <span>${best}</span>`, 'PLAY AGAIN');
+    }
+
+    function spawnParticles(gx, gy, color = COLORS.food) {
+      const cx = gx * CELL + CELL / 2;
+      const cy = gy * CELL + CELL / 2;
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI * 2 * i) / 6 + Math.random() * 0.5;
+        particles.push({
+          x: cx, y: cy,
+          vx: Math.cos(angle) * (1.5 + Math.random() * 2),
+          vy: Math.sin(angle) * (1.5 + Math.random() * 2),
+          life: 1, color,
+          r: 2 + Math.random() * 2
+        });
+      }
+    }
+
+    function updateParticles() {
+      particles = particles.filter(p => p.life > 0);
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        p.vx *= 0.9; p.vy *= 0.9;
+        p.life -= 0.04;
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+      drawObstacles();
+      drawFood();
+      drawSnake();
+      updateParticles();
+      drawParticles();
+    }
+
+    function drawDead() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+      drawObstacles();
+      drawFood();
+      // Draw snake in red
+      snake.forEach((s, i) => {
+        const t = i / snake.length;
+        ctx.fillStyle = `rgba(239,68,68,${1 - t * 0.7})`;
+        const pad = i === 0 ? 1 : 2;
+        ctx.beginPath();
+        ctx.roundRect(s.x * CELL + pad, s.y * CELL + pad, CELL - pad * 2, CELL - pad * 2, 3);
+        ctx.fill();
+      });
+      updateParticles();
+      drawParticles();
+    }
+
+    function drawGrid() {
+      ctx.strokeStyle = COLORS.grid;
+      ctx.lineWidth = 0.5;
+      for (let x = 0; x <= COLS; x++) {
+        ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y <= ROWS; y++) {
+        ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(canvas.width, y * CELL); ctx.stroke();
+      }
+    }
+
+    function drawObstacles() {
+      obstacles.forEach(key => {
+        const [x, y] = key.split(',').map(Number);
+        const pad = 2;
+        const x0 = x * CELL + pad, y0 = y * CELL + pad;
+        const size = CELL - pad * 2;
+
+        // Fill
+        ctx.fillStyle = COLORS.obstacle;
+        ctx.beginPath();
+        ctx.roundRect(x0, y0, size, size, 3);
+        ctx.fill();
+
+        // Inner highlight
+        ctx.fillStyle = COLORS.obstacleEdge;
+        ctx.beginPath();
+        ctx.roundRect(x0 + 2, y0 + 2, size - 4, 3, 1);
+        ctx.fill();
+
+        // Cross mark
+        ctx.strokeStyle = '#312e81';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x0 + 4, y0 + 4);
+        ctx.lineTo(x0 + size - 4, y0 + size - 4);
+        ctx.moveTo(x0 + size - 4, y0 + 4);
+        ctx.lineTo(x0 + 4, y0 + size - 4);
+        ctx.stroke();
+      });
+    }
+
+    function drawFood() {
+      const cx = food.x * CELL + CELL / 2;
+      const cy = food.y * CELL + CELL / 2;
+      const r = CELL / 2 - 3;
+      // Glow
+      const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2);
+      grd.addColorStop(0, COLORS.foodGlow);
+      grd.addColorStop(1, 'transparent');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(cx, cy, r * 2, 0, Math.PI * 2); ctx.fill();
+      // Dot
+      ctx.fillStyle = COLORS.food;
+      ctx.shadowColor = COLORS.food;
+      ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    function drawSnake() {
+      snake.forEach((s, i) => {
+        const t = i / snake.length;
+        if (i === 0) {
+          ctx.fillStyle = COLORS.head;
+          ctx.shadowColor = COLORS.head;
+          ctx.shadowBlur = 12;
+        } else {
+          const g = Math.round(100 + (50 - 100) * (t));
+          ctx.fillStyle = i < snake.length * 0.4 ? COLORS.body : COLORS.tail;
+          ctx.shadowBlur = 0;
+        }
+        const pad = i === 0 ? 1 : 2;
+        ctx.beginPath();
+        ctx.roundRect(s.x * CELL + pad, s.y * CELL + pad, CELL - pad * 2, CELL - pad * 2, i === 0 ? 4 : 3);
+        ctx.fill();
+
+        // Eyes on head
+        if (i === 0) {
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#0a0a0f';
+          const ex = dir.x, ey = dir.y;
+          const perp = { x: -ey, y: ex };
+          const cx = s.x * CELL + CELL / 2 + ex * (CELL * 0.2);
+          const cy = s.y * CELL + CELL / 2 + ey * (CELL * 0.2);
+          const er = CELL * 0.1;
+          ctx.beginPath(); ctx.arc(cx + perp.x * er * 1.2, cy + perp.y * er * 1.2, er, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(cx - perp.x * er * 1.2, cy - perp.y * er * 1.2, er, 0, Math.PI * 2); ctx.fill();
+        }
+      });
+      ctx.shadowBlur = 0;
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    function showOverlay(title, subtitle, btnText) {
+      overlay.innerHTML = `
+        <h2 style="color:${state === 'dead' ? '#ef4444' : '#4ade80'}">${title}</h2>
+        <div class="score-display" style="margin-top:0.5rem">${subtitle}</div>
+        <button id="start-btn">${btnText}</button>
+      `;
+      overlay.style.display = 'flex';
+      document.getElementById('start-btn').addEventListener('click', startGame);
+    }
+
+    function startGame() {
+      overlay.style.display = 'none';
+      state = 'playing';
+      init();
+      draw();
+      gameLoop = setInterval(step, speed);
+    }
+
+    // Controls
+    document.addEventListener('keydown', e => {
+      const map = {
+        ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
+        ArrowDown: { x: 0, y: 1 }, s: { x: 0, y: 1 }, S: { x: 0, y: 1 },
+        ArrowLeft: { x: -1, y: 0 }, a: { x: -1, y: 0 }, A: { x: -1, y: 0 },
+        ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
+      };
+      if (e.key === 'p' || e.key === 'P') {
+        if (state === 'playing') { clearInterval(gameLoop); state = 'paused'; showOverlay('PAUSED', '<span style="color:#555">press resume to continue</span>', 'RESUME'); }
+        else if (state === 'paused') { startGame(); }
+        return;
+      }
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+      const d = map[e.key];
+      if (!d || state !== 'playing') return;
+      // Prevent reversing
+      if (d.x === -dir.x && d.y === -dir.y) return;
+      nextDir = d;
+    });
+
+    // Touch swipe
+    let touchStart = null;
+    canvas.addEventListener('touchstart', e => { touchStart = e.touches[0]; }, { passive: true });
+    canvas.addEventListener('touchend', e => {
+      if (!touchStart || state !== 'playing') return;
+      const dx = e.changedTouches[0].clientX - touchStart.clientX;
+      const dy = e.changedTouches[0].clientY - touchStart.clientY;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        const d = dx > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 };
+        if (!(d.x === -dir.x)) nextDir = d;
+      } else {
+        const d = dy > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 };
+        if (!(d.y === -dir.y)) nextDir = d;
+      }
+    }, { passive: true });
+
+    document.getElementById('start-btn').addEventListener('click', startGame);
+  </script>
+</body>
+</html>
