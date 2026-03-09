@@ -1,0 +1,74 @@
+name: caritahub_alwayson
+description: "CaritaHub Senior App - Always-On Behavioural Intelligence"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Health data
+  health: ^11.1.0
+
+  # Background services
+  flutter_background_service: ^5.0.12
+  flutter_foreground_task: ^8.13.4
+  workmanager: ^0.9.0
+
+  # Local database
+  drift: ^2.24.0
+  sqlite3_flutter_libs: ^0.5.28
+
+  # HTTP client
+  dio: ^5.7.0
+
+  # State management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # Immutable data classes
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # Location
+  geolocator: ^13.0.2
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+  # Notifications
+  flutter_local_notifications: ^17.2.4
+
+  # Charts
+  fl_chart: ^0.70.2
+
+  # Utilities
+  connectivity_plus: ^6.1.1
+  device_info_plus: ^10.1.2
+  path: any
+  path_provider: ^2.1.5
+  share_plus: ^10.1.4
+  shared_preferences: ^2.3.4
+  intl: ^0.19.0
+  uuid: ^4.5.1
+  logger: ^2.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+  # Code generation
+  build_runner: ^2.4.14
+  drift_dev: ^2.24.0
+  freezed: ^2.5.7
+  json_serializable: ^6.9.0
+  riverpod_generator: ^2.6.2
+
+flutter:
+  uses-material-design: true

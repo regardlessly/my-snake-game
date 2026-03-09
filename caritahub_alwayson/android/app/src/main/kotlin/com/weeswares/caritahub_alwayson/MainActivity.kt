@@ -1,0 +1,5 @@
+package com.weeswares.caritahub_alwayson
+
+import io.flutter.embedding.android.FlutterFragmentActivity
+
+class MainActivity : FlutterFragmentActivity()
