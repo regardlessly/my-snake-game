@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.git/
+.env
+.DS_Store
+certs/
+kiosk-app/
+livekit/
+services/
+Caddyfile
+*.log

@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CaritaHub - Video Call</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #fff;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  #home-screen, #waiting-screen, #call-screen, #timeout-screen, #error-screen {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .active-screen { display: flex !important; }
+
+  /* Home / Call Staff button */
+  #home-screen .logo { font-size: 80px; margin-bottom: 24px; }
+  #home-screen h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+  #home-screen .subtitle { font-size: 20px; color: #aaa; margin-bottom: 48px; }
+  #call-staff-btn {
+    width: 280px; height: 100px;
+    background: #e8673a; color: #fff;
+    border: none; border-radius: 24px;
+    font-size: 28px; font-weight: 700;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    box-shadow: 0 6px 30px rgba(232,103,58,0.4);
+    transition: transform 0.1s;
+  }
+  #call-staff-btn:active { transform: scale(0.96); }
+  #call-staff-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  #call-staff-btn .icon { font-size: 40px; }
+
+  /* Waiting state */
+  #waiting-screen .preview-container {
+    width: 320px; height: 240px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 3px solid #e8673a;
+    margin-bottom: 32px;
+  }
+  #waiting-screen video { width: 100%; height: 100%; object-fit: cover; }
+  .waiting-text { font-size: 28px; font-weight: 600; margin-bottom: 16px; }
+  .waiting-dots span {
+    display: inline-block; width: 12px; height: 12px;
+    background: #e8673a; border-radius: 50%; margin: 0 6px;
+    animation: bounce 1.4s infinite ease-in-out;
+  }
+  .waiting-dots span:nth-child(2) { animation-delay: 0.16s; }
+  .waiting-dots span:nth-child(3) { animation-delay: 0.32s; }
+  @keyframes bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+  }
+  #countdown {
+    font-size: 20px; color: #aaa; margin-top: 16px;
+  }
+
+  /* Active call */
+  #call-screen { position: relative; min-height: 0; overflow: hidden; }
+  #video-container {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    position: relative;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  #remote-video, #video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  #local-pip {
+    position: absolute; bottom: 120px; right: 24px;
+    width: 180px; height: 135px;
+    border-radius: 12px; overflow: hidden;
+    border: 2px solid #e8673a;
+    z-index: 10;
+  }
+  #local-pip video { width: 100%; height: 100%; object-fit: cover; }
+  #end-call-btn {
+    position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 72px;
+    background: #dc3545; color: #fff;
+    border: none; border-radius: 36px;
+    font-size: 24px; font-weight: 700;
+    cursor: pointer; z-index: 10;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    box-shadow: 0 4px 20px rgba(220,53,69,0.5);
+  }
+  #end-call-btn:active { background: #a71d2a; }
+
+  /* Timeout / Error */
+  #timeout-screen .icon, #error-screen .icon {
+    font-size: 64px; margin-bottom: 24px;
+  }
+  #timeout-screen p, #error-screen p {
+    font-size: 24px; text-align: center; max-width: 500px; line-height: 1.5;
+  }
+  .return-btn {
+    margin-top: 32px; padding: 16px 40px;
+    background: #e8673a; color: #fff;
+    border: none; border-radius: 12px;
+    font-size: 22px; font-weight: 600; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<!-- SCREEN 1: Home — Call Staff button -->
+<div id="home-screen" class="active-screen">
+  <div class="logo">&#x1f3e2;</div>
+  <h1>CaritaHub Kiosk</h1>
+  <p class="subtitle">Need help? Speak to a staff member.</p>
+  <button id="call-staff-btn" onclick="startEscalation()">
+    <span class="icon">&#x1f4f9;</span> Call Staff
+  </button>
+</div>
+
+<!-- SCREEN 2: Waiting for staff -->
+<div id="waiting-screen">
+  <div class="preview-container">
+    <video id="self-preview" autoplay muted playsinline></video>
+  </div>
+  <p class="waiting-text">Connecting you to staff...</p>
+  <div class="waiting-dots"><span></span><span></span><span></span></div>
+  <p id="countdown"></p>
+  <button class="return-btn" onclick="cancelCall()" style="margin-top:40px; background:#555;">Cancel</button>
+</div>
+
+<!-- SCREEN 3: Active call -->
+<div id="call-screen">
+  <div id="video-container">
+    <video id="remote-video" autoplay playsinline></video>
+  </div>
+  <div id="local-pip">
+    <video id="local-video" autoplay muted playsinline></video>
+  </div>
+  <button id="end-call-btn" onclick="endCall()">
+    <span style="font-size:28px;">&#x1f4f5;</span> End Call
+  </button>
+</div>
+
+<!-- SCREEN 4: Timeout -->
+<div id="timeout-screen">
+  <div class="icon">&#x23f0;</div>
+  <p>No staff available right now.<br>We'll follow up with you.</p>
+  <button class="return-btn" onclick="returnToHome()">Return to Menu</button>
+</div>
+
+<!-- SCREEN 5: Error -->
+<div id="error-screen">
+  <div class="icon">&#x26a0;</div>
+  <p id="error-message">Something went wrong. Please try again.</p>
+  <button class="return-btn" onclick="returnToHome()">Try Again</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
+<script>
+const LivekitClient = window.LivekitClient;
+
+// Orchestrator API base URL
+// When served from the orchestrator itself (same origin), use relative paths
+// When hosted externally (e.g., GitHub Pages), point to the orchestrator
+const API_BASE = window.location.port === '8200' || window.location.hostname === 'localhost'
+  ? ''  // same-origin — page served by the orchestrator
+  : `${window.location.protocol}//${window.location.hostname}:8200`;
+
+// LiveKit URL — set by API response (supports LiveKit Cloud or self-hosted)
+let LIVEKIT_URL = '';
+
+const TIMEOUT_SEC = 90;
+
+// Demo member info (in production, passed from the kiosk app)
+const MEMBER = {
+  member_id: 42,
+  member_name: 'Mdm Chong Chok Yen',
+  centre_id: 1,
+  centre_name: 'Jalan Besar Active Ageing Centre',
+  language: 'Mandarin',
+  summary: 'Senior requested staff assistance via kiosk.',
+  risk_tier: 'R2',
+  trigger_type: 'button',
+  audio_only: false,
+};
+
+let room = null;
+let roomName = '';
+let countdownTimer = null;
+let remaining = TIMEOUT_SEC;
+
+function showScreen(id) {
+  document.querySelectorAll('[id$="-screen"]').forEach(el => el.classList.remove('active-screen'));
+  document.getElementById(id).classList.add('active-screen');
+}
+
+function speak(text) {
+  if ('speechSynthesis' in window) {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.9;
+    u.pitch = 1;
+    speechSynthesis.speak(u);
+  }
+}
+
+// ===== STEP 1: Senior taps "Call Staff" =====
+async function startEscalation() {
+  const btn = document.getElementById('call-staff-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="icon">&#x23f3;</span> Connecting...';
+
+  try {
+    // Call the orchestrator to create a room + notify staff via Telegram
+    const resp = await fetch(`${API_BASE}/api/escalation/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(MEMBER),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Server error: ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    console.log('Escalation created:', data);
+
+    roomName = data.room_name;
+    const token = data.senior_token;
+    LIVEKIT_URL = data.livekit_url;
+
+    // Switch to waiting screen
+    showScreen('waiting-screen');
+    speak('Connecting you to staff. Please wait.');
+
+    // Connect to LiveKit
+    await connectToRoom(token);
+
+  } catch (err) {
+    console.error('Escalation error:', err);
+    document.getElementById('error-message').textContent =
+      `Could not start call: ${err.message || err}`;
+    showScreen('error-screen');
+    btn.disabled = false;
+    btn.innerHTML = '<span class="icon">&#x1f4f9;</span> Call Staff';
+  }
+}
+
+// ===== STEP 2: Connect to LiveKit room =====
+async function connectToRoom(token) {
+  room = new LivekitClient.Room({
+    adaptiveStream: true,
+    dynacast: true,
+    videoCaptureDefaults: {
+      resolution: LivekitClient.VideoPresets.h720.resolution,
+    },
+  });
+
+  room.on(LivekitClient.RoomEvent.ParticipantConnected, (participant) => {
+    if (participant.identity === 'staff') {
+      clearInterval(countdownTimer);
+      showScreen('call-screen');
+      speak('Staff has joined the call.');
+    }
+  });
+
+  room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    if (participant.identity === 'staff') {
+      if (track.kind === 'video') {
+        const el = track.attach();
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.objectFit = 'contain';
+        const container = document.getElementById('video-container');
+        const old = container.querySelector('video');
+        if (old) old.remove();
+        container.appendChild(el);
+        el.id = 'remote-video';
+      } else if (track.kind === 'audio') {
+        const el = track.attach();
+        document.body.appendChild(el);
+      }
+    }
+  });
+
+  room.on(LivekitClient.RoomEvent.Disconnected, () => {
+    clearInterval(countdownTimer);
+    // Only navigate away if we were in a call, not if connection failed
+    if (document.getElementById('call-screen').classList.contains('active-screen')) {
+      speak('Call ended.');
+      returnToHome();
+    }
+  });
+
+  room.on(LivekitClient.RoomEvent.ParticipantDisconnected, (participant) => {
+    if (participant.identity === 'staff') {
+      speak('Staff has disconnected.');
+      endCall();
+    }
+  });
+
+  console.log('Connecting to LiveKit:', LIVEKIT_URL);
+  await room.connect(LIVEKIT_URL, token);
+  console.log('Connected to LiveKit room:', roomName);
+
+  // Enable camera and mic
+  try {
+    await room.localParticipant.enableCameraAndMicrophone();
+    console.log('Camera and mic enabled');
+  } catch (mediaErr) {
+    console.warn('Camera/mic error:', mediaErr);
+    try {
+      await room.localParticipant.setMicrophoneEnabled(true);
+      console.log('Mic-only fallback');
+    } catch (micErr) {
+      console.warn('Mic also failed:', micErr);
+    }
+  }
+
+  // Show local preview
+  const camSource = LivekitClient.Track.Source.Camera;
+  const localVideo = room.localParticipant.getTrackPublication(camSource);
+  if (localVideo && localVideo.track) {
+    const previewEl = localVideo.track.attach();
+    document.getElementById('self-preview').replaceWith(previewEl);
+    previewEl.id = 'self-preview';
+    previewEl.muted = true;
+
+    const pipEl = localVideo.track.attach();
+    document.getElementById('local-video').replaceWith(pipEl);
+    pipEl.id = 'local-video';
+    pipEl.muted = true;
+  }
+
+  startCountdown();
+}
+
+function startCountdown() {
+  remaining = TIMEOUT_SEC;
+  const el = document.getElementById('countdown');
+  countdownTimer = setInterval(() => {
+    remaining--;
+    el.textContent = `Waiting... ${remaining}s`;
+    if (remaining <= 0) {
+      clearInterval(countdownTimer);
+      handleTimeout();
+    }
+  }, 1000);
+}
+
+function handleTimeout() {
+  showScreen('timeout-screen');
+  speak('No staff available. We will follow up.');
+  if (room) room.disconnect();
+  fetch(`${API_BASE}/api/escalation/${roomName}/end`, { method: 'POST' }).catch(() => {});
+}
+
+function cancelCall() {
+  clearInterval(countdownTimer);
+  if (room) room.disconnect();
+  fetch(`${API_BASE}/api/escalation/${roomName}/end`, { method: 'POST' }).catch(() => {});
+  returnToHome();
+}
+
+async function endCall() {
+  clearInterval(countdownTimer);
+  if (room) room.disconnect();
+  fetch(`${API_BASE}/api/escalation/${roomName}/end`, { method: 'POST' }).catch(() => {});
+  returnToHome();
+}
+
+function returnToHome() {
+  room = null;
+  roomName = '';
+  // Reset button
+  const btn = document.getElementById('call-staff-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<span class="icon">&#x1f4f9;</span> Call Staff';
+  showScreen('home-screen');
+}
+</script>
+</body>
+</html>

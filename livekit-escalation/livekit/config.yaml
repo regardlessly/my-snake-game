@@ -1,0 +1,9 @@
+port: 7880
+rtc:
+  port_range_start: 50000
+  port_range_end: 50200
+  use_external_ip: false
+keys:
+  APIL2rWekGpLVv6: ad9St8xKwGXqpPfsR7cBoFXQXqXYRTv3eU7p33xL3XX
+logging:
+  level: info

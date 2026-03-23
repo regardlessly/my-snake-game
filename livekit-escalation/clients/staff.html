@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CaritaHub - Staff Video Call</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0d1117;
+    color: #fff;
+    height: 100vh; height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Context bar */
+  #context-bar {
+    background: #161b22;
+    padding: 12px 16px;
+    border-bottom: 1px solid #30363d;
+    flex-shrink: 0;
+  }
+  .context-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .context-row:last-child { margin-bottom: 0; }
+  .badge {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 12px; font-size: 12px; font-weight: 600;
+  }
+  .badge-risk { background: #da3633; }
+  .badge-lang { background: #1f6feb; }
+  .member-name { font-size: 18px; font-weight: 700; }
+  .summary-text { font-size: 13px; color: #8b949e; line-height: 1.4; }
+
+  /* Video area */
+  #video-container {
+    flex: 1;
+    position: relative;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #remote-video {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+  #local-pip {
+    position: absolute; top: 12px; right: 12px;
+    width: 120px; height: 90px;
+    border-radius: 8px; overflow: hidden;
+    border: 2px solid #e8673a;
+    z-index: 10;
+  }
+  #local-pip video { width: 100%; height: 100%; object-fit: cover; }
+
+  .connecting-msg {
+    font-size: 20px; color: #8b949e; text-align: center;
+  }
+
+  /* Controls */
+  #controls {
+    display: flex; justify-content: center; gap: 16px;
+    padding: 16px;
+    background: #161b22;
+    border-top: 1px solid #30363d;
+    flex-shrink: 0;
+  }
+  .ctrl-btn {
+    height: 56px; border-radius: 28px; border: none;
+    font-size: 16px; font-weight: 600;
+    cursor: pointer; display: flex;
+    align-items: center; justify-content: center; gap: 8px;
+    padding: 0 24px;
+  }
+  .btn-end { background: #dc3545; color: #fff; }
+  .btn-end:active { background: #a71d2a; }
+  .btn-task { background: #238636; color: #fff; }
+  .btn-task:active { background: #196c2e; }
+  .btn-mute { background: #30363d; color: #fff; min-width: 56px; padding: 0; }
+  .btn-mute.muted { background: #da3633; }
+
+  /* Permission request */
+  #permission-screen {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+  }
+  #permission-screen h2 { font-size: 22px; margin-bottom: 12px; }
+  #permission-screen p { font-size: 16px; color: #8b949e; margin-bottom: 24px; max-width: 360px; }
+  #join-btn {
+    padding: 16px 48px; background: #e8673a; color: #fff;
+    border: none; border-radius: 12px;
+    font-size: 20px; font-weight: 700; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div id="permission-screen">
+  <h2>&#x1f4f9; Video Call with Senior</h2>
+  <p id="join-context">Senior is waiting for you.</p>
+  <button id="join-btn" onclick="joinCall()">Join Call</button>
+</div>
+
+<div id="call-view" style="display:none; flex:1; flex-direction:column;">
+  <div id="context-bar">
+    <div class="context-row">
+      <span class="member-name" id="ctx-name">Member</span>
+      <span class="badge badge-lang" id="ctx-lang">English</span>
+      <span class="badge badge-risk" id="ctx-risk" style="display:none;">R2</span>
+    </div>
+    <div class="context-row">
+      <span class="summary-text" id="ctx-summary"></span>
+    </div>
+  </div>
+
+  <div id="video-container">
+    <p class="connecting-msg" id="connecting-msg">Connecting to senior...</p>
+    <video id="remote-video" autoplay playsinline style="display:none;"></video>
+    <div id="local-pip">
+      <video id="local-video" autoplay muted playsinline></video>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button class="ctrl-btn btn-mute" id="mic-btn" onclick="toggleMic()">&#x1f3a4;</button>
+    <button class="ctrl-btn btn-mute" id="cam-btn" onclick="toggleCam()">&#x1f4f7;</button>
+    <button class="ctrl-btn btn-end" onclick="endCall()">&#x1f4f5; End Call</button>
+    <button class="ctrl-btn btn-task" onclick="createTask()">&#x1f4cb; Follow-up</button>
+  </div>
+</div>
+
+<!-- LiveKit JS SDK from CDN — no local server dependency -->
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
+<script>
+const LivekitClient = window.LivekitClient;
+
+const params = new URLSearchParams(window.location.search);
+const TOKEN = params.get('token') || '';
+const WS_URL = params.get('ws') || '';
+
+// Member context from URL params (embedded in Telegram link)
+const MEMBER_NAME = params.get('name') || 'Senior';
+const LANGUAGE = params.get('lang') || '';
+const RISK_TIER = params.get('risk') || '';
+const SUMMARY = params.get('summary') || '';
+
+let room = null;
+let micEnabled = true;
+let camEnabled = true;
+
+// Populate join screen context
+document.getElementById('join-context').textContent =
+  `${MEMBER_NAME}${LANGUAGE ? ' (' + LANGUAGE + ')' : ''} is waiting for you.`;
+
+function populateContext() {
+  document.getElementById('ctx-name').textContent = MEMBER_NAME;
+  if (LANGUAGE) document.getElementById('ctx-lang').textContent = LANGUAGE;
+  if (RISK_TIER) {
+    const el = document.getElementById('ctx-risk');
+    el.textContent = RISK_TIER;
+    el.style.display = 'inline-block';
+  }
+  if (SUMMARY) document.getElementById('ctx-summary').textContent = SUMMARY;
+}
+
+async function joinCall() {
+  if (!TOKEN || !WS_URL) {
+    alert('Invalid call link — missing token or server URL.');
+    return;
+  }
+
+  const btn = document.getElementById('join-btn');
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+
+  try {
+    room = new LivekitClient.Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        resolution: LivekitClient.VideoPresets.h720.resolution,
+      },
+    });
+
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      if (track.kind === 'video') {
+        const el = track.attach();
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.objectFit = 'cover';
+        const remote = document.getElementById('remote-video');
+        remote.replaceWith(el);
+        el.id = 'remote-video';
+        el.style.display = 'block';
+        document.getElementById('connecting-msg').style.display = 'none';
+      } else if (track.kind === 'audio') {
+        const el = track.attach();
+        document.body.appendChild(el);
+      }
+    });
+
+    room.on(LivekitClient.RoomEvent.Disconnected, () => {
+      showEndScreen('Call ended.');
+    });
+
+    room.on(LivekitClient.RoomEvent.ParticipantDisconnected, (participant) => {
+      if (participant.identity.startsWith('senior_')) {
+        document.getElementById('connecting-msg').textContent = 'Senior has left the call.';
+        document.getElementById('connecting-msg').style.display = 'block';
+        document.getElementById('remote-video').style.display = 'none';
+      }
+    });
+
+    console.log('Connecting to LiveKit:', WS_URL);
+    await room.connect(WS_URL, TOKEN);
+    console.log('Connected to LiveKit room');
+
+    // Switch to call view
+    document.getElementById('permission-screen').style.display = 'none';
+    const callView = document.getElementById('call-view');
+    callView.style.display = 'flex';
+    populateContext();
+
+    // Enable camera and mic
+    try {
+      await room.localParticipant.enableCameraAndMicrophone();
+    } catch (mediaErr) {
+      console.warn('Camera/mic error:', mediaErr);
+      document.getElementById('connecting-msg').textContent =
+        'Camera unavailable — audio only.';
+      document.getElementById('connecting-msg').style.display = 'block';
+      try {
+        await room.localParticipant.setMicrophoneEnabled(true);
+      } catch (micErr) {
+        console.warn('Mic also failed:', micErr);
+      }
+    }
+
+    // Show local video
+    const camSource = LivekitClient.Track.Source.Camera;
+    const localVideo = room.localParticipant.getTrackPublication(camSource);
+    if (localVideo && localVideo.track) {
+      const el = localVideo.track.attach();
+      document.getElementById('local-video').replaceWith(el);
+      el.id = 'local-video';
+      el.muted = true;
+    }
+  } catch (err) {
+    console.error('Join error:', err);
+    alert(`Failed to join call: ${err.message || err}`);
+    btn.disabled = false;
+    btn.textContent = 'Join Call';
+  }
+}
+
+function toggleMic() {
+  if (!room) return;
+  micEnabled = !micEnabled;
+  room.localParticipant.setMicrophoneEnabled(micEnabled);
+  const btn = document.getElementById('mic-btn');
+  btn.classList.toggle('muted', !micEnabled);
+  btn.textContent = micEnabled ? '\u{1F3A4}' : '\u{1F507}';
+}
+
+function toggleCam() {
+  if (!room) return;
+  camEnabled = !camEnabled;
+  room.localParticipant.setCameraEnabled(camEnabled);
+  const btn = document.getElementById('cam-btn');
+  btn.classList.toggle('muted', !camEnabled);
+  btn.textContent = camEnabled ? '\u{1F4F7}' : '\u{1F6AB}';
+}
+
+async function endCall() {
+  if (room) room.disconnect();
+  showEndScreen('Call ended. Thank you for helping!');
+}
+
+function showEndScreen(msg) {
+  document.getElementById('call-view').style.display = 'none';
+  document.getElementById('permission-screen').style.display = 'flex';
+  document.querySelector('#permission-screen h2').textContent = 'Call Ended';
+  document.querySelector('#permission-screen p').textContent = msg;
+  document.getElementById('join-btn').style.display = 'none';
+}
+
+function createTask() {
+  alert('Follow-up task will be created in CaritaHub for ' + MEMBER_NAME);
+}
+
+// Check if missing params
+if (!TOKEN || !WS_URL) {
+  document.querySelector('#permission-screen h2').textContent = 'Call Unavailable';
+  document.querySelector('#permission-screen p').textContent =
+    'This call has ended or the link is invalid. Please check CaritaHub for pending tasks.';
+  document.getElementById('join-btn').style.display = 'none';
+}
+</script>
+</body>
+</html>
