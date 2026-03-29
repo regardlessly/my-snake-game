@@ -1,0 +1,10 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+sympy==1.13.*
+latex2sympy2==1.9.*
+boto3==1.38.*
+pydantic-settings==2.7.*
+redis==5.2.*
+httpx==0.28.*
+python-dotenv==1.1.*
+asyncpg==0.30.*

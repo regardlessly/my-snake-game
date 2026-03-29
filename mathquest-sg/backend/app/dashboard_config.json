@@ -1,0 +1,8 @@
+{
+  "modelId": "amazon.nova-lite-v1:0",
+  "region": "us-east-1",
+  "temperature": 0.7,
+  "maxTokens": 2048,
+  "guardrailEnabled": true,
+  "systemPromptOverride": null
+}

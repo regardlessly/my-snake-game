@@ -1,0 +1,304 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+enum SkillStatus {
+  LOCKED
+  UNLOCKED
+  ATTEMPTED
+  FAMILIAR
+  PROFICIENT
+  MASTERED
+}
+
+enum Strand {
+  NUMBER_ALGEBRA
+  GEOMETRY
+  STATISTICS
+}
+
+// ─── Curriculum ──────────────────────────────────────────
+
+model CurriculumTopic {
+  id           String  @id // e.g. "primes-hcf-lcm", "integers"
+  gLevel       Int     @default(3)
+  strand       Strand
+  name         String
+  description  String?
+  term         Int // 1-4
+  chapter      Int // display order / chapter number
+  displayOrder Int
+  totalSkills  Int     @default(4)
+  properties   Json?   @default("{}")
+  notesHtml    String? @db.Text
+
+  prerequisites TopicPrerequisite[] @relation("TopicDependsOn")
+  dependents    TopicPrerequisite[] @relation("TopicRequiredBy")
+  questions     Question[]
+  examQuestions ExamQuestion[]
+  skillProgress UserSkillProgress[]
+
+  @@map("curriculum_topics")
+}
+
+model TopicPrerequisite {
+  topicId        String
+  prerequisiteId String
+  relationship   String @default("required") // required | recommended
+
+  topic        CurriculumTopic @relation("TopicDependsOn", fields: [topicId], references: [id])
+  prerequisite CurriculumTopic @relation("TopicRequiredBy", fields: [prerequisiteId], references: [id])
+
+  @@id([topicId, prerequisiteId])
+  @@map("topic_prerequisites")
+}
+
+// ─── Users ───────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  clerkId       String?   @unique
+  email         String    @unique
+  displayName   String
+  gLevel        Int       @default(3)
+  avatarId      Int       @default(1)
+  totalXp       Int       @default(0)
+  currentLevel  Int       @default(1)
+  streakDays    Int       @default(0)
+  longestStreak Int       @default(0)
+  streakFreezes Int       @default(0)
+  lastActiveAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  skillProgress    UserSkillProgress[]
+  xpEvents         XpEvent[]
+  achievements     UserAchievement[]
+  conversations    Conversation[]
+  whatsappStudents WhatsAppStudent[]
+  guardrailLogs    GuardrailLog[]
+
+  @@map("users")
+}
+
+// ─── Progress Tracking ───────────────────────────────────
+
+model UserSkillProgress {
+  id                 String      @id @default(cuid())
+  userId             String
+  topicId            String
+  skillId            String // e.g. "prime-factorisation"
+  status             SkillStatus @default(UNLOCKED)
+  masteryProbability Float       @default(0.0)
+  slidingWindow      Int[]       @default([])
+  accuracyRate       Float       @default(0.0)
+  difficultyLevel    Int         @default(1) // 1-5
+  totalAttempts      Int         @default(0)
+  correctAttempts    Int         @default(0)
+  lastPracticedAt    DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  user  User            @relation(fields: [userId], references: [id])
+  topic CurriculumTopic @relation(fields: [topicId], references: [id])
+
+  @@unique([userId, topicId, skillId])
+  @@map("user_skill_progress")
+}
+
+// ─── Questions ───────────────────────────────────────────
+
+model Question {
+  id            String   @id @default(cuid())
+  topicId       String
+  skillId       String
+  difficulty    Int      @default(1) // 1-5
+  questionJson  Json // { q, opts, ans, explain, latex?, sympyExpr? }
+  sympyVerified Boolean  @default(false)
+  aiGenerated   Boolean  @default(false)
+  timesServed   Int      @default(0)
+  avgAccuracy   Float?
+  createdAt     DateTime @default(now())
+
+  topic CurriculumTopic @relation(fields: [topicId], references: [id])
+
+  @@index([topicId, skillId, difficulty])
+  @@map("questions")
+}
+
+// ─── Gamification ────────────────────────────────────────
+
+model XpEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  eventType String // CORRECT_ANSWER, TOPIC_COMPLETE, STREAK_BONUS, etc.
+  xpAmount  Int
+  metadata  Json?    @default("{}")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("xp_events")
+}
+
+model Achievement {
+  id          String @id @default(cuid())
+  code        String @unique
+  name        String
+  description String
+  iconUrl     String?
+  xpReward    Int    @default(0)
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  userId        String
+  achievementId String
+  earnedAt      DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id])
+  achievement Achievement @relation(fields: [achievementId], references: [id])
+
+  @@id([userId, achievementId])
+  @@map("user_achievements")
+}
+
+// ─── Conversations ───────────────────────────────────────
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  topicId   String?
+  messages  Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, updatedAt])
+  @@map("conversations")
+}
+
+// ─── WhatsApp / Dashboard ────────────────────────────────
+
+model WhatsAppStudent {
+  id          String   @id @default(cuid())
+  phoneNumber String   @unique
+  displayName String   @default("Unknown")
+  status      String   @default("pending") // pending, approved, denied
+  userId      String?
+  parentCode  String?  @unique
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user              User?             @relation(fields: [userId], references: [id])
+  botConversations  BotConversation[]
+  guardrailLogs     GuardrailLog[]
+
+  @@map("whatsapp_students")
+}
+
+model BotConversation {
+  id          String   @id @default(cuid())
+  waStudentId String
+  topicId     String?
+  messages    Json     @default("[]")
+  tokenCount  Int      @default(0)
+  modelUsed   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  waStudent WhatsAppStudent @relation(fields: [waStudentId], references: [id])
+
+  @@index([waStudentId])
+  @@index([createdAt])
+  @@map("bot_conversations")
+}
+
+model GuardrailLog {
+  id            String   @id @default(cuid())
+  waStudentId   String?
+  userId        String?
+  messageText   String
+  blockedReason String
+  source        String   @default("whatsapp")
+  createdAt     DateTime @default(now())
+
+  waStudent WhatsAppStudent? @relation(fields: [waStudentId], references: [id])
+  user      User?            @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@map("guardrail_logs")
+}
+
+// ─── Exam Question Bank ──────────────────────────────────
+
+model ExamBank {
+  id         String   @id @default(cuid())
+  school     String
+  examName   String
+  subject    String
+  level      String
+  year       Int?
+  fileHash   String   @unique
+  totalMarks Int?
+  metadata   Json     @default("{}")
+  importedAt DateTime @default(now())
+
+  questions ExamQuestion[]
+
+  @@map("exam_banks")
+}
+
+model ExamQuestion {
+  id                 String   @id @default(cuid())
+  examBankId         String
+  topicId            String
+  sourceId           String
+  questionNumber     String
+  section            String?
+  marks              Int      @default(1)
+  difficulty         Int      @default(1)
+  questionText       String
+  questionLatex      String?
+  answer             String
+  answerLatex        String?
+  solutionSteps      Json     @default("[]")
+  keywords           Json     @default("[]")
+  hasDiagram         Boolean  @default(false)
+  diagramDescription String?
+  strand             String?
+  createdAt          DateTime @default(now())
+
+  examBank ExamBank        @relation(fields: [examBankId], references: [id], onDelete: Cascade)
+  topic    CurriculumTopic @relation(fields: [topicId], references: [id])
+
+  @@unique([examBankId, sourceId])
+  @@index([topicId])
+  @@index([difficulty])
+  @@map("exam_questions")
+}
+
+model DailyUsageStats {
+  date            DateTime @id @db.Date
+  activeStudents  Int      @default(0)
+  totalQuestions  Int      @default(0)
+  totalCorrect   Int      @default(0)
+  waMessages      Int      @default(0)
+  bedrockTokens   Int      @default(0)
+  guardrailBlocks Int      @default(0)
+
+  @@map("daily_usage_stats")
+}
